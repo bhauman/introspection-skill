@@ -224,6 +224,18 @@
                 (and re limit)  (take limit))]
     (vec metas)))
 
+(defn compact-meta
+  "Terse one-line projection of a session header for `list --oneline`:
+  the fields you actually scan to pick a session, nothing heavy."
+  [m]
+  (array-map
+   :id (:id m)
+   :mtime (:mtime m)
+   :messages (:messages m)
+   :subagents (:subagents m)
+   :cwd (:cwd m)
+   :title (:title m)))
+
 (defn list-subagents
   "List the subagent sessions of a (parent) session handle."
   [handle]

@@ -11,6 +11,17 @@
 ;; Normalization: rows -> flat, indexed events
 ;; ---------------------------------------------------------------------------
 
+(def rejection-re
+  "A tool_result is_error that is actually a *user decline* (rejected an
+  AskUserQuestion / ExitPlanMode / Edit, etc.) rather than a tool failure.
+  These should not inflate the error rate."
+  #"(?i)tool use was rejected|user doesn't want to proceed")
+
+(defn rejected-content?
+  "True when a tool_result's content string is a user-decline, not a fault."
+  [content]
+  (boolean (and (string? content) (re-find rejection-re content))))
+
 (defn content-str
   "Collapse a tool_result / message content value to a single string."
   [c]
@@ -39,10 +50,14 @@
                          :name (:name block)
                          :tool_use_id (:id block)
                          :input (:input block))
-      "tool_result" (assoc base :kind "tool_result"
-                           :tool_use_id (:tool_use_id block)
-                           :is_error (boolean (:is_error block))
-                           :content (content-str (:content block)))
+      "tool_result" (let [content (content-str (:content block))
+                          err     (boolean (:is_error block))]
+                      (assoc base :kind "tool_result"
+                             :tool_use_id (:tool_use_id block)
+                             :is_error err
+                             ;; a user decline, not a tool fault
+                             :rejected (and err (rejected-content? content))
+                             :content content))
       ;; unknown block kind: passthrough
       (assoc base :kind (or (:type block) "unknown") :block block))))
 
@@ -159,10 +174,13 @@
     (->> uses
          (group-by :name)
          (map (fn [[nm calls]]
-                (let [errs (count (filter #(:is_error (results (:tool_use_id %))) calls))]
+                (let [res  (map #(results (:tool_use_id %)) calls)
+                      errs (count (filter #(and (:is_error %) (not (:rejected %))) res))
+                      rejs (count (filter :rejected res))]
                   {:name nm
                    :calls (count calls)
-                   :errors errs
+                   :errors errs        ; genuine tool faults only
+                   :rejected rejs      ; user declines (not faults)
                    :mcp (boolean (str/starts-with? (or nm "") "mcp__"))
                    :first_i (apply min (map :i calls))
                    :last_i (apply max (map :i calls))})))
@@ -171,8 +189,8 @@
 
 (defn tool-calls
   "Every call to tools matching `name` (glob), paired with its result.
-  opts: :grep :offset :limit."
-  [evs name {:keys [grep offset limit]}]
+  opts: :grep :offset :limit :errors-only."
+  [evs name {:keys [grep offset limit errors-only]}]
   (let [results (result-index evs)
         re      (when grep (re-pattern grep))
         calls   (->> evs
@@ -188,8 +206,10 @@
                                :input (:input u)
                                :result (when r {:i (:i r)
                                                 :is_error (:is_error r)
+                                                :rejected (:rejected r)
                                                 :content (:content r)})}))))
         calls   (cond->> calls
+                  errors-only (filter #(get-in % [:result :is_error]))
                   re (filter #(re-find re (str (json/generate-string (:input %))
                                                (get-in % [:result :content]))))
                   offset (drop offset)
@@ -242,14 +262,22 @@
         sum   (fn [ms] (reduce (fn [a m]
                                  (merge-with + a (select-keys m [:input :output :cache_read :cache_creation])))
                                {:input 0 :output 0 :cache_read 0 :cache_creation 0}
-                               ms))]
+                               ms))
+        ;; cache_read is ~10x cheaper than fresh input; surfacing the share
+        ;; makes "cache dominates" legible without baking in $ pricing.
+        with-pct (fn [m]
+                   (let [in-side (+ (:input m) (:cache_creation m) (:cache_read m))]
+                     (assoc m :input_side_total in-side
+                            :cache_read_pct (if (pos? in-side)
+                                              (Math/round (* 100.0 (/ (:cache_read m) in-side)))
+                                              0))))]
     (case by
       "message" (vec usages)
       "model"   (->> usages (group-by :model)
-                     (map (fn [[m ms]] (assoc (sum ms) :model m :messages (count ms))))
+                     (map (fn [[m ms]] (assoc (with-pct (sum ms)) :model m :messages (count ms))))
                      vec)
       ;; default: totals
-      (assoc (sum usages) :messages (count usages)))))
+      (assoc (with-pct (sum usages)) :messages (count usages)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Summary
@@ -261,14 +289,16 @@
   (let [evs     (events rows)
         results (result-index evs)
         uses    (filter #(= "tool_use" (:kind %)) evs)
-        errs    (count (filter #(:is_error (results (:tool_use_id %))) uses))
+        res     (map #(results (:tool_use_id %)) uses)
+        errs    (count (filter #(and (:is_error %) (not (:rejected %))) res))
+        rejs    (count (filter :rejected res))
         skills  (->> uses (filter #(= "Skill" (:name %))) (map #(get-in % [:input :skill])))
         models  (->> rows (filter #(= "assistant" (:type %)))
                      (keep #(get-in % [:message :model])) distinct vec)
         tss     (keep :timestamp rows)]
     {:id (-> (re-find #"[^/]+$" (str path)) (str/replace #"\.jsonl$" ""))
      :path (str path)
-     :title (->> rows (filter #(= "ai-title" (:type %))) last :aiTitle)
+     :title (or (->> rows (filter #(= "ai-title" (:type %))) last :aiTitle) "")
      :cwd (->> rows (keep :cwd) first)
      :gitBranch (->> rows (keep :gitBranch) first)
      :models models
@@ -280,6 +310,7 @@
      :by_kind (frequencies (map :kind evs))
      :tool_calls (count uses)
      :tool_errors errs
+     :tool_rejected rejs
      :tools (->> uses (map :name) frequencies (sort-by val >)
                  (mapv (fn [[k v]] {:name k :calls v})))
      :skills (vec (distinct skills))

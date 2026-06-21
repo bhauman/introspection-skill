@@ -9,7 +9,7 @@
             [introspect.render :as r]
             [clojure.string :as str]))
 
-(def boolean-flags #{:full :no-thinking :all :errors-only})
+(def boolean-flags #{:full :no-thinking :all :errors-only :oneline})
 (def long-flags    #{:limit :offset :max-chars})
 
 (defn parse-args
@@ -44,6 +44,7 @@ USAGE: claude-sessions <command> [handle] [args] [flags]
 
 COMMANDS
   list                       Find sessions, newest first (default: current project)
+                               --oneline  (terse: id,mtime,#msgs,#subagents,cwd,title)
                                --all  --project DIR  --grep RE  --since ISO
                                --limit N (default 20)  --offset N (page)
   summary   <handle>         Cheap structural map of a session
@@ -51,9 +52,9 @@ COMMANDS
                                --kind tool_use,prompt,...  --role  --tool GLOB
                                --range A:B  --offset/--limit N  --grep RE
                                --no-thinking  --since/--until ISO  --full/--max-chars N
-  tools     <handle>         Per-tool factual rollup (calls, errors)   --name GLOB
+  tools     <handle>         Per-tool rollup (calls, errors, rejected)   --name GLOB
   tool      <handle> <glob>  Every call to matching tool(s), use+result paired (full content)
-                               --grep RE  --offset/--limit N  --max-chars N
+                               --errors-only  --grep RE  --offset/--limit N  --max-chars N
   skills    <handle>         Each Skill invocation + preceding prompt   --name GLOB
   subagents <handle>         List subagent sessions (dive in with handle session/agent-id)
   tokens    <handle>         Token accounting   --by total|message|model
@@ -70,7 +71,10 @@ GLOB matches tool names with * and ? (e.g. 'mcp__clojure-mcp__*', 'Bash').")
 (defn run [pos opts]
   (case (first pos)
     "list"
-    (r/print-json (sess/list-sessions opts))
+    (let [sessions (sess/list-sessions opts)]
+      (if (:oneline opts)
+        (r/print-jsonl (map sess/compact-meta sessions) opts)
+        (r/print-json sessions opts)))
 
     "summary"
     (let [{:keys [path]} (sess/resolve-handle (handle pos))]

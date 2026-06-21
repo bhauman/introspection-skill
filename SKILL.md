@@ -44,21 +44,26 @@ Subagents are first-class: list them with `subagents`, then point any command
 ## Workflow: start cheap, then drill in
 
 1. **`list`** — find the session, **newest first**. Defaults to the current
-   project and the **20 most recent** sessions (`--limit` default 20); `--all`,
-   `--project DIR`, `--grep RE`, `--since ISO`. Page with `--offset N`; raise
-   `--limit` for more.
+   project and the **20 most recent** sessions (`--limit` default 20). Use
+   **`--oneline`** for a terse one-session-per-line projection (id, mtime, #msgs,
+   #subagents, cwd, title) — the cheapest way to orient. `--all`, `--project DIR`,
+   `--grep RE`, `--since ISO`. Page with `--offset N`; raise `--limit` for more.
 2. **`summary <h>`** — one cheap call: title, cwd, models, event/message counts,
-   per-tool call counts, tool errors, skills used, token totals. Read this first
+   per-tool call counts, **`tool_errors` (genuine faults) and `tool_rejected`
+   (user declines)** kept separate, skills used, token totals. Read this first
    to decide where to look.
 3. **Drill in** with a slice (never dump a whole transcript blind):
-   - `tools <h>` — per-tool rollup `{calls, errors, mcp, first_i, last_i}`; `--name GLOB`.
+   - `tools <h>` — per-tool rollup `{calls, errors, rejected, mcp, first_i, last_i}`;
+     `--name GLOB`. `errors` = real faults only; `rejected` = user-declined calls.
    - `tool <h> <glob>` — **every call** to matching tool(s), tool_use paired with
      its tool_result, **full content** (this is the view for judging whether a
-     tool's description led to correct usage). `--grep`, `--offset/--limit`.
+     tool's description led to correct usage). `--errors-only`, `--grep`,
+     `--offset/--limit`. Each result carries `is_error` and `rejected`.
    - `skills <h>` — each `Skill` invocation with `{skill, args}` and the user
      prompt that preceded it (for trigger-accuracy evals). `--name`.
    - `transcript <h>` — normalized JSONL event stream, one event per line.
-   - `tokens <h>` — `--by total|message|model`.
+   - `tokens <h>` — `--by total|message|model`. Rollups add `input_side_total`
+     and `cache_read_pct` so cache-vs-fresh cost is legible without pricing.
    - `subagents <h>` — list subagent sessions, then dive in.
    - `event <h> <i>` — one full event by index (to expand something truncated).
 
@@ -71,7 +76,8 @@ Apply to `transcript` (and most accept a subset elsewhere):
 - `--tool GLOB` — keep only matching tool calls **and their paired results** (`Bash`, `mcp__clojure-mcp__*`)
 - `--range A:B` — event-index window (half-open); or `--offset/--limit N`
 - `--grep RE` — regex over text / tool input / result content
-- `--no-thinking` — drop reasoning blocks · `--errors-only` — only failed tool results
+- `--no-thinking` — drop reasoning blocks · `--errors-only` — only `is_error` tool
+  results (works on `transcript` and `tool`; rejections are flagged via `rejected`)
 - `--since/--until ISO` — timestamp bounds
 - `--full` / `--max-chars N` — content length. Default truncates strings to
   ~1500 chars with `…[+N chars]`. `tool` and `event` default to full.
@@ -81,15 +87,17 @@ all speak it, so you can page a transcript and then expand any single event.
 
 ## Eval recipes
 
-- **Judge a tool's description from usage**: `tool <h> 'Bash'` → read inputs +
-  results, spot misuse / repeated errors → propose a description tweak.
+- **Judge a tool's description from usage**: `tool <h> 'Bash' --errors-only` →
+  read the failing inputs + results, spot misuse / repeated errors → propose a
+  description tweak. (Drop `--errors-only` to see all calls.)
 - **Was a skill triggered appropriately?**: `skills <h>` → compare each
   `preceding_prompt` against where the skill *should* have fired (false neg/pos).
 - **Compare two tools' usage**: `tools <h> --name 'mcp__clojure-mcp__*'` then
   `tools <h> --name 'Edit'` to see which the model reached for.
 - **Audit a subagent**: `subagents <h>` → `transcript <h>/<agent> --kind tool_use`
   → `tool <h>/<agent> <name>` for the calls that matter.
-- **All failures in a session**: `transcript <h> --errors-only`.
+- **All failures in a session**: `transcript <h> --errors-only` (each tool_result
+  carries `rejected` so you can tell genuine faults from user declines).
 
 ## Data model (what's underneath)
 
@@ -97,7 +105,9 @@ A session is `~/.claude/projects/<encoded-cwd>/<id>.jsonl`, one JSON row per
 line. Rows are normalized into indexed **events** (`prompt`, `text`, `thinking`,
 `tool_use`, `tool_result`, `system`, `attachment`); sidecar rows (`ai-title`,
 `mode`, `permission-mode`, `last-prompt`, …) are dropped from the stream but feed
-`list`/`summary`. `tool_use.id` ↔ `tool_result.tool_use_id` (carries `is_error`).
+`list`/`summary`. `tool_use.id` ↔ `tool_result.tool_use_id` (carries `is_error`,
+and a derived `rejected` flag when the error is a user decline — "tool use was
+rejected" — rather than a real fault, so error rates aren't inflated).
 Subagents live in `<id>/subagents/agent-<aid>.jsonl` with a sibling
 `.meta.json` (`agentType`, `description`, `toolUseId` → the parent `Agent`/`Task`
 call). Skills are detected from `Skill` tool_use blocks (`{skill, args}`);
