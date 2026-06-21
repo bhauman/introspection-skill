@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Entry point for claude-sessions. Resolves the project's bb.edn so the
+# tool works from any working directory.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec bb --config "$HERE/bb.edn" -m introspect.core "$@"

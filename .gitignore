@@ -1,0 +1,17 @@
+# Clojure / Babashka
+.cpcache/
+.clj-kondo/.cache/
+.lsp/
+.nrepl-port
+.portal/
+target/
+classes/
+
+# Logs (incl. local MCP/hook logs that land in the project dir)
+*.log
+
+# Editor / OS
+.DS_Store
+*~
+\#*\#
+.\#*

@@ -1,0 +1,6 @@
+{:paths ["src"]
+ :deps {}
+ :tasks
+ {introspect {:doc "Run the introspection CLI"
+              :requires ([introspect.core])
+              :task (apply introspect.core/-main *command-line-args*)}}}
