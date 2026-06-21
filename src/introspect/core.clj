@@ -43,8 +43,9 @@ USAGE: claude-sessions <command> [handle] [args] [flags]
   HANDLE = session-id (or prefix) | path/to.jsonl | latest | session/agent-prefix
 
 COMMANDS
-  list                       Find sessions (default: current project)
-                               --all  --project DIR  --grep RE  --since ISO  --limit/--offset N
+  list                       Find sessions, newest first (default: current project)
+                               --all  --project DIR  --grep RE  --since ISO
+                               --limit N (default 20)  --offset N (page)
   summary   <handle>         Cheap structural map of a session
   transcript <handle>        Normalized JSONL event stream
                                --kind tool_use,prompt,...  --role  --tool GLOB

@@ -192,13 +192,20 @@
      :subagents (if (fs/directory? subdir)
                   (count (fs/glob subdir "*.jsonl")) 0)}))
 
+(def default-list-limit
+  "Page size for `list` when --limit is not given. Newest first; page with
+  --offset, or raise --limit for more."
+  20)
+
 (defn list-sessions
-  "List session headers. opts: :all :project :grep :since :limit :offset.
+  "List session headers, newest first. opts: :all :project :grep :since
+  :limit :offset. :limit defaults to `default-list-limit`.
 
   Reading a header parses the whole file, so when there is no content
   :grep we page on the (cheap) mtime-sorted file list *before* reading."
-  [{:keys [grep since limit offset] :as opts}]
-  (let [re    (when grep (re-pattern grep))
+  [{:keys [grep since offset] :as opts}]
+  (let [limit (or (:limit opts) default-list-limit)
+        re    (when grep (re-pattern grep))
         files (->> (session-files opts)
                    ;; cheap mtime filter + sort without opening files
                    (filter #(or (nil? since)

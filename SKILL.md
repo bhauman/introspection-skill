@@ -43,8 +43,10 @@ Subagents are first-class: list them with `subagents`, then point any command
 
 ## Workflow: start cheap, then drill in
 
-1. **`list`** — find the session. Defaults to the current project; `--all`,
-   `--project DIR`, `--grep RE`, `--since ISO`, `--limit/--offset`.
+1. **`list`** — find the session, **newest first**. Defaults to the current
+   project and the **20 most recent** sessions (`--limit` default 20); `--all`,
+   `--project DIR`, `--grep RE`, `--since ISO`. Page with `--offset N`; raise
+   `--limit` for more.
 2. **`summary <h>`** — one cheap call: title, cwd, models, event/message counts,
    per-tool call counts, tool errors, skills used, token totals. Read this first
    to decide where to look.
