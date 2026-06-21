@@ -44,3 +44,9 @@
 (defn print-err [msg data]
   (binding [*out* *err*]
     (println (json/generate-string (cond-> {:error msg} data (assoc :data data))))))
+
+(defn print-note
+  "Informational diagnostic to stderr, so stdout stays pure data."
+  [msg]
+  (binding [*out* *err*]
+    (println (str "note: " msg))))

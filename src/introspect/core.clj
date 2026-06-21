@@ -9,7 +9,7 @@
             [introspect.render :as r]
             [clojure.string :as str]))
 
-(def boolean-flags #{:full :no-thinking :all :errors-only :oneline})
+(def boolean-flags #{:full :no-thinking :all :errors-only :verbose :oneline})
 (def long-flags    #{:limit :offset :max-chars})
 
 (defn parse-args
@@ -43,10 +43,13 @@ USAGE: claude-sessions <command> [handle] [args] [flags]
   HANDLE = session-id (or prefix) | path/to.jsonl | latest | session/agent-prefix
 
 COMMANDS
-  list                       Find sessions, newest first (default: current project)
-                               --oneline  (terse: id,mtime,#msgs,#subagents,cwd,title)
-                               --all  --project DIR  --grep RE  --since ISO
+  list                       Find sessions, newest first; terse by default
+                               (id,mtime,#msgs,#subagents,cwd,title — one per line)
+                               --verbose  full per-session objects
+                               --grep RE  regex over title/prompts/cwd
+                               --all  --project DIR  --since ISO
                                --limit N (default 20)  --offset N (page)
+                               (a stderr note tells you when results were capped)
   summary   <handle>         Cheap structural map of a session
   transcript <handle>        Normalized JSONL event stream
                                --kind tool_use,prompt,...  --role  --tool GLOB
@@ -71,14 +74,29 @@ GLOB matches tool names with * and ? (e.g. 'mcp__clojure-mcp__*', 'Bash').")
 (defn run [pos opts]
   (case (first pos)
     "list"
-    (let [sessions (sess/list-sessions opts)]
-      (if (:oneline opts)
-        (r/print-jsonl (map sess/compact-meta sessions) opts)
-        (r/print-json sessions opts)))
+    (let [{:keys [sessions total offset]} (sess/list-sessions opts)
+          shown (count sessions)]
+      ;; never silently hide sessions: if results were capped, say so
+      (when (> total (+ offset shown))
+        (r/print-note (format "showing %d of %d sessions (offset %d) — raise --limit, use --offset, or --grep to find more"
+                              shown total offset)))
+      (if (:verbose opts)
+        (r/print-json sessions opts)                       ; full per-session objects
+        (r/print-jsonl (map sess/compact-meta sessions) opts)))  ; terse, default
 
     "summary"
-    (let [{:keys [path]} (sess/resolve-handle (handle pos))]
-      (r/print-json (az/summary (sess/load-rows path) path)))
+    (let [h (handle pos)
+          {:keys [path]} (sess/resolve-handle h)
+          base (az/summary (sess/load-rows path) path)
+          subs (sess/list-subagents h)
+          agg  (if (seq subs)
+                 {:count (count subs)
+                  :with_errors (count (filter #(pos? (or (:tool_errors %) 0)) subs))
+                  :tool_uses (reduce + 0 (map #(or (:tool_uses %) 0) subs))
+                  :tool_errors (reduce + 0 (map #(or (:tool_errors %) 0) subs))
+                  :tool_rejected (reduce + 0 (map #(or (:tool_rejected %) 0) subs))}
+                 {:count 0})]
+      (r/print-json (assoc base :subagents agg)))
 
     "transcript"
     (r/print-jsonl (az/filter-events (events-of pos) opts) opts)

@@ -43,15 +43,20 @@ Subagents are first-class: list them with `subagents`, then point any command
 
 ## Workflow: start cheap, then drill in
 
-1. **`list`** — find the session, **newest first**. Defaults to the current
-   project and the **20 most recent** sessions (`--limit` default 20). Use
-   **`--oneline`** for a terse one-session-per-line projection (id, mtime, #msgs,
-   #subagents, cwd, title) — the cheapest way to orient. `--all`, `--project DIR`,
-   `--grep RE`, `--since ISO`. Page with `--offset N`; raise `--limit` for more.
+1. **`list`** — find the session, **newest first**, **terse by default** (one
+   JSON line each: id, mtime, #msgs, #subagents, cwd, title). `--verbose` for the
+   full per-session objects. Searches with **`--grep RE`** (regex over
+   title/prompts **and cwd** — reaches past the page, so it's how you find an
+   older session). Scope with `--all` / `--project DIR` / `--since ISO`. Defaults
+   to the current project and **20 sessions** (`--limit`); page with `--offset N`.
+   **When results are capped, a `note:` line on stderr tells you** (`showing 20 of
+   62 …`) so a session is never silently hidden.
 2. **`summary <h>`** — one cheap call: title, cwd, models, event/message counts,
    per-tool call counts, **`tool_errors` (genuine faults) and `tool_rejected`
-   (user declines)** kept separate, skills used, token totals. Read this first
-   to decide where to look.
+   (user declines)** kept separate, skills used, token totals, **plus a
+   `subagents` aggregate (`count`, `with_errors`, `tool_errors`, …) so child
+   failures show up even when the parent is clean**. Read this first to decide
+   where to look.
 3. **Drill in** with a slice (never dump a whole transcript blind):
    - `tools <h>` — per-tool rollup `{calls, errors, rejected, mcp, first_i, last_i}`;
      `--name GLOB`. `errors` = real faults only; `rejected` = user-declined calls.
@@ -64,7 +69,8 @@ Subagents are first-class: list them with `subagents`, then point any command
    - `transcript <h>` — normalized JSONL event stream, one event per line.
    - `tokens <h>` — `--by total|message|model`. Rollups add `input_side_total`
      and `cache_read_pct` so cache-vs-fresh cost is legible without pricing.
-   - `subagents <h>` — list subagent sessions, then dive in.
+   - `subagents <h>` — list subagent sessions with per-agent `assistant_turns`,
+     `tool_uses`, `tool_errors`, `tool_rejected`, tokens — then dive in.
    - `event <h> <i>` — one full event by index (to expand something truncated).
 
 ## Slicing flags (the whole point — keep your context small)

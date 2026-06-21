@@ -12,7 +12,8 @@
   replaced by '-'."
   (:require [babashka.fs :as fs]
             [cheshire.core :as json]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [introspect.analyze :as az]))
 
 (declare resolve-handle)
 
@@ -197,32 +198,40 @@
   --offset, or raise --limit for more."
   20)
 
+(defn- grep-match?
+  "Does a session header match the search regex? Searches title, the first
+  and last prompt, and the cwd."
+  [re m]
+  (boolean (some #(and % (re-find re %))
+                 [(:title m) (:first_prompt m) (:last_prompt m) (:cwd m)])))
+
 (defn list-sessions
   "List session headers, newest first. opts: :all :project :grep :since
   :limit :offset. :limit defaults to `default-list-limit`.
 
+  Returns {:sessions [headers] :total N :offset O :limit L} so callers can
+  tell when results were capped (and a session is therefore hidden).
+
   Reading a header parses the whole file, so when there is no content
   :grep we page on the (cheap) mtime-sorted file list *before* reading."
   [{:keys [grep since offset] :as opts}]
-  (let [limit (or (:limit opts) default-list-limit)
-        re    (when grep (re-pattern grep))
-        files (->> (session-files opts)
-                   ;; cheap mtime filter + sort without opening files
-                   (filter #(or (nil? since)
-                                (>= (compare (str (fs/last-modified-time %)) since) 0)))
-                   (sort-by #(str (fs/last-modified-time %)))
-                   reverse)
-        files (if re                         ; grep needs contents -> can't pre-page
-                files
-                (cond->> files offset (drop offset) limit (take limit)))
-        metas (map session-meta files)
-        metas (cond->> metas
-                re     (filter #(some->> [(:title %) (:first_prompt %) (:last_prompt %)]
-                                         (keep identity)
-                                         (some (fn [s] (re-find re s)))))
-                (and re offset) (drop offset)
-                (and re limit)  (take limit))]
-    (vec metas)))
+  (let [limit  (or (:limit opts) default-list-limit)
+        offset (or offset 0)
+        re     (when grep (re-pattern grep))
+        files  (->> (session-files opts)
+                    ;; cheap mtime filter + sort without opening files
+                    (filter #(or (nil? since)
+                                 (>= (compare (str (fs/last-modified-time %)) since) 0)))
+                    (sort-by #(str (fs/last-modified-time %)))
+                    reverse)
+        [total page]
+        (if re
+          ;; grep needs contents -> read all, filter, then page
+          (let [matched (->> files (map session-meta) (filter #(grep-match? re %)))]
+            [(count matched) (->> matched (drop offset) (take limit) vec)])
+          ;; no grep -> page the file list, then read only that page
+          [(count files) (->> files (drop offset) (take limit) (mapv session-meta))])]
+    {:sessions page :total total :offset offset :limit limit}))
 
 (defn compact-meta
   "Terse one-line projection of a session header for `list --oneline`:
@@ -254,10 +263,14 @@
                                   (str/replace #"\.jsonl$" ""))
                          assistants (filter #(= "assistant" (:type %)) rows)
                          usage (keep #(get-in % [:message :usage]) assistants)
-                         tool-uses (->> assistants
-                                        (mapcat #(get-in % [:message :content]))
-                                        (filter #(= "tool_use" (:type %)))
-                                        count)]
+                         ;; pair tool_use<->tool_result inside the subagent to
+                         ;; surface its own errors (invisible from the parent)
+                         evs     (az/events rows)
+                         results (az/result-index evs)
+                         uses    (filter #(= "tool_use" (:kind %)) evs)
+                         res     (map #(results (:tool_use_id %)) uses)
+                         errs    (count (filter #(and (:is_error %) (not (:rejected %))) res))
+                         rejs    (count (filter :rejected res))]
                      {:agent_id aid
                       :handle (str sid "/" (subs aid 0 (min 8 (count aid))))
                       :type (:agentType m)
@@ -266,6 +279,8 @@
                       :path p
                       :messages (count rows)
                       :assistant_turns (count assistants)
-                      :tool_uses tool-uses
+                      :tool_uses (count uses)
+                      :tool_errors errs
+                      :tool_rejected rejs
                       :tokens {:input  (reduce + 0 (keep :input_tokens usage))
                                :output (reduce + 0 (keep :output_tokens usage))}})))))))
