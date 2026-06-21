@@ -230,13 +230,17 @@
          (filter #(or (nil? name) (matches-name? name (get-in % [:input :skill]))))
          (map (fn [u]
                 (let [r (results (:tool_use_id u))]
-                  {:i (:i u)
-                   :ts (:ts u)
-                   :skill (get-in u [:input :skill])
-                   :args (get-in u [:input :args])
-                   :sidechain (:sidechain u)
-                   :preceding_prompt (prev-prompt (:i u))
-                   :result (when r {:is_error (:is_error r) :content (:content r)})})))
+                  ;; the tool_result here is just "Launching skill: X" — noise.
+                  ;; Keep a launched flag; surface :error only when it failed.
+                  (cond-> {:i (:i u)
+                           :ts (:ts u)
+                           :skill (get-in u [:input :skill])
+                           :args (get-in u [:input :args])
+                           :sidechain (:sidechain u)
+                           :preceding_prompt (prev-prompt (:i u))}
+                    r (assoc :launched (not (:is_error r)))
+                    (and r (:is_error r))
+                    (assoc :error {:rejected (:rejected r) :content (:content r)})))))
          vec)))
 
 ;; ---------------------------------------------------------------------------

@@ -69,8 +69,11 @@ Subagents are first-class: list them with `subagents`, then point any command
    - `transcript <h>` — normalized JSONL event stream, one event per line.
    - `tokens <h>` — `--by total|message|model`. Rollups add `input_side_total`
      and `cache_read_pct` so cache-vs-fresh cost is legible without pricing.
+     **`--include-subagents`** rolls up the whole session tree (e.g. `--by model`
+     then shows the Opus parent and any Haiku subagents separately).
    - `subagents <h>` — list subagent sessions with per-agent `assistant_turns`,
-     `tool_uses`, `tool_errors`, `tool_rejected`, tokens — then dive in.
+     `tool_uses`, `tool_errors`, `tool_rejected`, `started`/`ended`, and tokens
+     (incl. `cache_read_pct`); `handle` is the short `id/agent` form — dive in with it.
    - `event <h> <i>` — one full event by index (to expand something truncated).
 
 ## Slicing flags (the whole point — keep your context small)

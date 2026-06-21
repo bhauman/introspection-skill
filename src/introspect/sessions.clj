@@ -245,6 +245,15 @@
    :cwd (:cwd m)
    :title (:title m)))
 
+(defn subagent-paths
+  "Just the .jsonl paths of a session's subagents (cheap; no parsing)."
+  [handle]
+  (let [{:keys [path]} (resolve-handle handle)
+        sid (str/replace (fs/file-name path) #"\.jsonl$" "")
+        dir (fs/path (fs/parent path) sid "subagents")]
+    (when (fs/directory? dir)
+      (mapv str (fs/glob dir "*.jsonl")))))
+
 (defn list-subagents
   "List the subagent sessions of a (parent) session handle."
   [handle]
@@ -263,6 +272,7 @@
                                   (str/replace #"\.jsonl$" ""))
                          assistants (filter #(= "assistant" (:type %)) rows)
                          usage (keep #(get-in % [:message :usage]) assistants)
+                         tss   (keep :timestamp rows)
                          ;; pair tool_use<->tool_result inside the subagent to
                          ;; surface its own errors (invisible from the parent)
                          evs     (az/events rows)
@@ -270,17 +280,27 @@
                          uses    (filter #(= "tool_use" (:kind %)) evs)
                          res     (map #(results (:tool_use_id %)) uses)
                          errs    (count (filter #(and (:is_error %) (not (:rejected %))) res))
-                         rejs    (count (filter :rejected res))]
+                         rejs    (count (filter :rejected res))
+                         in (reduce + 0 (keep :input_tokens usage))
+                         out (reduce + 0 (keep :output_tokens usage))
+                         cr (reduce + 0 (keep :cache_read_input_tokens usage))
+                         cc (reduce + 0 (keep :cache_creation_input_tokens usage))
+                         side (+ in cc cr)]
                      {:agent_id aid
-                      :handle (str sid "/" (subs aid 0 (min 8 (count aid))))
+                      ;; short, copy-pasteable handle matching the CLI convention
+                      :handle (str (subs sid 0 (min 8 (count sid))) "/"
+                                   (subs aid 0 (min 8 (count aid))))
                       :type (:agentType m)
                       :description (:description m)
                       :tool_use_id (:toolUseId m)
                       :path p
+                      :started (first tss)
+                      :ended (last tss)
                       :messages (count rows)
                       :assistant_turns (count assistants)
                       :tool_uses (count uses)
                       :tool_errors errs
                       :tool_rejected rejs
-                      :tokens {:input  (reduce + 0 (keep :input_tokens usage))
-                               :output (reduce + 0 (keep :output_tokens usage))}})))))))
+                      :tokens {:input in :output out :cache_read cr :cache_creation cc
+                               :cache_read_pct (if (pos? side)
+                                                 (Math/round (* 100.0 (/ cr side))) 0)}})))))))

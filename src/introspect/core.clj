@@ -9,7 +9,8 @@
             [introspect.render :as r]
             [clojure.string :as str]))
 
-(def boolean-flags #{:full :no-thinking :all :errors-only :verbose :oneline})
+(def boolean-flags #{:full :no-thinking :all :errors-only :verbose :oneline
+                     :include-subagents})
 (def long-flags    #{:limit :offset :max-chars})
 
 (defn parse-args
@@ -61,6 +62,7 @@ COMMANDS
   skills    <handle>         Each Skill invocation + preceding prompt   --name GLOB
   subagents <handle>         List subagent sessions (dive in with handle session/agent-id)
   tokens    <handle>         Token accounting   --by total|message|model
+                               --include-subagents  roll up parent + all subagents
   event     <handle> <i>     One full event by index (expands a truncated one)
 
 GLOB matches tool names with * and ? (e.g. 'mcp__clojure-mcp__*', 'Bash').")
@@ -118,7 +120,13 @@ GLOB matches tool names with * and ? (e.g. 'mcp__clojure-mcp__*', 'Bash').")
     (r/print-json (sess/list-subagents (handle pos)))
 
     "tokens"
-    (r/print-json (az/token-rollup (rows-of pos) opts))
+    (let [h (handle pos)
+          {:keys [path]} (sess/resolve-handle h)
+          rows (cond-> (sess/load-rows path)
+                 ;; roll the whole session tree's cost into one accounting
+                 (:include-subagents opts)
+                 (into (mapcat sess/load-rows (sess/subagent-paths h))))]
+      (r/print-json (az/token-rollup rows opts)))
 
     "event"
     (let [i (or (some-> (nth pos 2 nil) parse-long)
