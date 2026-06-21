@@ -65,10 +65,10 @@
 
 (defn- session-files
   "All top-level session .jsonl files under one or all project dirs."
-  [{:keys [all project]}]
+  [{:keys [all-projects project]}]
   (let [dirs (cond
-               project [project]
-               all     (filter fs/directory? (map str (fs/list-dir projects-root)))
+               project      [project]
+               all-projects (filter fs/directory? (map str (fs/list-dir projects-root)))
                :else   (if-let [d (current-project-dir)]
                          [d]
                          (filter fs/directory? (map str (fs/list-dir projects-root)))))]
@@ -82,7 +82,7 @@
   current project first, then all projects. Throws on ambiguity / no match."
   [id]
   (let [hits (->> (concat (session-files {})
-                          (session-files {:all true}))
+                          (session-files {:all-projects true}))
                   distinct
                   (filter #(str/starts-with? (fs/file-name %) id)))
         hits (distinct hits)]
@@ -211,8 +211,8 @@
                  [(:title m) (:first_prompt m) (:last_prompt m) (:cwd m)])))
 
 (defn list-sessions
-  "List session headers, newest first. opts: :all :project :grep :since
-  :limit :offset :all-time.
+  "List session headers, newest first. opts: :all-projects :project :grep
+  :since :limit :offset :all-time.
 
   Default window is the last `default-age-days`; older sessions are hidden but
   counted (:older) so the caller can say so. An explicit --grep searches *all*

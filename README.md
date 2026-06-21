@@ -33,8 +33,9 @@ A **handle** is `latest`, a session-id (or prefix), a path to a `.jsonl`, or
 `--tool`, `--role`, `--grep`, `--range A:B`, `--offset/--limit`, `--since/--until`,
 `--errors-only`, `--no-thinking`, `--full/--max-chars`.
 
-The CLI works from any directory; `list` defaults to the project for the
-current working dir (`--all` / `--project DIR` to widen).
+The CLI works from any directory. `list` defaults to the current project and the
+last 3 weeks; widen scope with `--all-projects` / `--project DIR` and time with
+`--all-time` / `--since DATE`. `--grep` searches all time.
 
 ## Layout
 

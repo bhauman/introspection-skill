@@ -9,32 +9,38 @@
             [introspect.render :as r]
             [clojure.string :as str]))
 
-(def boolean-flags #{:full :no-thinking :all :errors-only :verbose :oneline
-                     :include-subagents :all-time})
+(def boolean-flags #{:full :no-thinking :all-projects :errors-only :verbose
+                     :oneline :include-subagents :all-time})
+(def value-flags   #{:project :grep :since :until :limit :offset :max-chars
+                     :kind :role :tool :range :name :by})
 (def long-flags    #{:limit :offset :max-chars})
 
 (defn parse-args
-  "Split argv into {:pos [...] :opts {...}}. Supports --flag, --key val,
-  --key=val."
+  "Split argv into {:pos [...] :opts {...} :unknown [...]}. Supports --flag,
+  --key val, --key=val. An unrecognized --flag is treated as a boolean (it does
+  NOT swallow the next arg) and recorded in :unknown so the caller can warn —
+  this keeps a typo or stale flag from silently eating a real value."
   [args]
-  (loop [args args, pos [], opts {}]
+  (loop [args args, pos [], opts {}, unknown []]
     (if-let [a (first args)]
       (cond
         (str/starts-with? a "--")
-        (let [body (subs a 2)
-              [k v] (if (str/includes? body "=")
-                      (str/split body #"=" 2)
-                      [body nil])
-              k (keyword k)]
+        (let [body  (subs a 2)
+              [k v] (if (str/includes? body "=") (str/split body #"=" 2) [body nil])
+              k     (keyword k)
+              long? (long-flags k)]
           (cond
-            (boolean-flags k) (recur (rest args) pos (assoc opts k true))
             (some? v)         (recur (rest args) pos
-                                     (assoc opts k (if (long-flags k) (parse-long v) v)))
-            :else             (recur (drop 2 args) pos
+                                     (assoc opts k (if long? (parse-long v) v)) unknown)
+            (boolean-flags k) (recur (rest args) pos (assoc opts k true) unknown)
+            (value-flags k)   (recur (drop 2 args) pos
                                      (assoc opts k (let [nv (second args)]
-                                                     (if (long-flags k) (parse-long nv) nv))))))
-        :else (recur (rest args) (conj pos a) opts))
-      {:pos pos :opts opts})))
+                                                     (if long? (parse-long nv) nv)))
+                                     unknown)
+            :else             (recur (rest args) pos (assoc opts k true)
+                                     (conj unknown (str "--" body)))))
+        :else (recur (rest args) (conj pos a) opts unknown))
+      {:pos pos :opts opts :unknown unknown})))
 
 (def usage
   "claude-sessions — introspect Claude Code sessions (output is JSON/JSONL)
@@ -46,11 +52,12 @@ USAGE: claude-sessions <command> [handle] [args] [flags]
 COMMANDS
   list                       Find sessions, newest first; terse by default
                                (id,mtime,#msgs,#subagents,cwd,title — one per line)
-                               default window: last 3 weeks (older hidden; stderr note)
-                               --all-time  no age cap   --since ISO  set the window
+                               TIME:  default window last 3 weeks (older hidden; stderr note)
+                                      --all-time (no age cap)  --since ISO (set window)
+                               SCOPE: current project by default
+                                      --all-projects  --project DIR
                                --grep RE   regex over title/prompts/cwd (searches ALL time)
-                               --verbose   full per-session objects
-                               --all  --project DIR  --limit N  --offset N
+                               --verbose   full per-session objects   --limit/--offset N
   summary   <handle>         Cheap structural map of a session
   transcript <handle>        Normalized JSONL event stream
                                --kind tool_use,prompt,...  --role  --tool GLOB
@@ -145,7 +152,10 @@ GLOB matches tool names with * and ? (e.g. 'mcp__clojure-mcp__*', 'Bash').")
     (throw (ex-info (str "Unknown command: " (first pos)) {}))))
 
 (defn -main [& args]
-  (let [{:keys [pos opts]} (parse-args args)]
+  (let [{:keys [pos opts unknown]} (parse-args args)]
+    (when (seq unknown)
+      (r/print-note (str "ignored unknown flag(s): " (str/join " " unknown)
+                         " — run `claude-sessions help`")))
     (try
       (run pos opts)
       (catch clojure.lang.ExceptionInfo e

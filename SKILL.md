@@ -29,6 +29,13 @@ bb --config <skill-dir>/bb.edn -m introspect.core <command> [handle] [args] [fla
 
 Run `claude-sessions help` for the full surface.
 
+**Output:** rollup commands (`summary`, `tools`, `tool`, `skills`, `subagents`,
+`tokens`, `list --verbose`) print **one JSON value**; the event stream
+(`transcript`) and the default `list` print **JSONL** — one object per line — so
+you can `head`/grep/slice without parsing the whole thing. Diagnostics (e.g. the
+"older sessions hidden" note) go to **stderr**, so keep streams separate (don't
+`2>&1`) when piping stdout into a JSON parser.
+
 ## Handle — every command takes one
 
 | Form | Meaning |
@@ -43,14 +50,19 @@ Subagents are first-class: list them with `subagents`, then point any command
 
 ## Workflow: start cheap, then drill in
 
-1. **`list`** — find the session, **newest first**, **terse by default** (one
-   JSON line each: id, mtime, #msgs, #subagents, cwd, title). `--verbose` for the
-   full per-session objects. **Default window: the last 3 weeks** — older sessions
-   are hidden (sessions pile up forever), with a `note:` on stderr saying how many
-   and how to widen (`--since DATE` or `--all-time`). **`--grep RE`** (regex over
-   title/prompts/cwd) **searches all time**, so it's how you find an older session
-   by keyword. Scope with `--all` (all projects) / `--project DIR`; page with
-   `--limit`/`--offset`. A session is never silently hidden — watch the stderr note.
+1. **`list`** — find a session, **newest first**, **terse by default** (one JSON
+   line each: id, mtime, #msgs, #subagents, cwd, title; `--verbose` for full
+   objects). Two independent axes:
+   - **time** — default window is the **last 3 weeks** (sessions pile up forever);
+     older ones are hidden but counted, with a stderr `note:`. Widen with
+     `--since DATE` or `--all-time`.
+   - **scope** — current project by default; `--all-projects` (every project) or
+     `--project DIR`.
+
+   **`--grep RE`** (regex over title/prompts/cwd) **searches all time**, so it's how
+   you find an older session by keyword. Page with `--limit`/`--offset`. A session is
+   never silently hidden — watch the stderr note. (Addressing a session by id with
+   *any* command bypasses the window; the window only narrows `list` browsing.)
 2. **`summary <h>`** — one cheap call: title, cwd, models, event/message counts,
    per-tool call counts, **`tool_errors` (genuine faults) and `tool_rejected`
    (user declines)** kept separate, skills used, token totals, **plus a
@@ -119,5 +131,7 @@ and a derived `rejected` flag when the error is a user decline — "tool use was
 rejected" — rather than a real fault, so error rates aren't inflated).
 Subagents live in `<id>/subagents/agent-<aid>.jsonl` with a sibling
 `.meta.json` (`agentType`, `description`, `toolUseId` → the parent `Agent`/`Task`
-call). Skills are detected from `Skill` tool_use blocks (`{skill, args}`);
-user-typed `/slash` commands are plain prompt text, not skill invocations.
+call); every event carries `sidechain: true` when it happened inside a subagent
+rather than the main thread (so all events of a subagent handle are sidechain).
+Skills are detected from `Skill` tool_use blocks (`{skill, args}`); user-typed
+`/slash` commands are plain prompt text, not skill invocations.
