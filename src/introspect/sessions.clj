@@ -180,10 +180,10 @@
         subdir (fs/path (fs/parent path) sid "subagents")]
     {:id sid
      :path (str path)
-     :title title
+     :title (or title "")
      :cwd cwd
-     :first_prompt (when (seq firstp) firstp)
-     :last_prompt lastp
+     :first_prompt (or firstp "")
+     :last_prompt (or lastp "")
      :mtime (str (fs/last-modified-time path))
      :messages (count rows)
      :by_type types
@@ -240,8 +240,12 @@
                          aid  (-> (fs/file-name p)
                                   (str/replace #"^agent-" "")
                                   (str/replace #"\.jsonl$" ""))
-                         usage (->> rows (filter #(= "assistant" (:type %)))
-                                    (keep #(get-in % [:message :usage])))]
+                         assistants (filter #(= "assistant" (:type %)) rows)
+                         usage (keep #(get-in % [:message :usage]) assistants)
+                         tool-uses (->> assistants
+                                        (mapcat #(get-in % [:message :content]))
+                                        (filter #(= "tool_use" (:type %)))
+                                        count)]
                      {:agent_id aid
                       :handle (str sid "/" (subs aid 0 (min 8 (count aid))))
                       :type (:agentType m)
@@ -249,5 +253,7 @@
                       :tool_use_id (:toolUseId m)
                       :path p
                       :messages (count rows)
+                      :assistant_turns (count assistants)
+                      :tool_uses tool-uses
                       :tokens {:input  (reduce + 0 (keep :input_tokens usage))
                                :output (reduce + 0 (keep :output_tokens usage))}})))))))
