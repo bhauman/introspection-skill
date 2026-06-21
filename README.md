@@ -141,3 +141,7 @@ carries `sidechain: true` when it happened inside a subagent. Subagents live und
 `<id>/subagents/agent-<aid>.jsonl` with a sibling `.meta.json` (`agentType`,
 `description`, `toolUseId` → the parent `Agent`/`Task` call). Skills are detected
 from `Skill` tool_use blocks; user-typed `/slash` commands are plain prompt text.
+
+## License
+
+[MIT](./LICENSE) © Bruce Hauman
