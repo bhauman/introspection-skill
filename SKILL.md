@@ -45,12 +45,12 @@ Subagents are first-class: list them with `subagents`, then point any command
 
 1. **`list`** — find the session, **newest first**, **terse by default** (one
    JSON line each: id, mtime, #msgs, #subagents, cwd, title). `--verbose` for the
-   full per-session objects. Searches with **`--grep RE`** (regex over
-   title/prompts **and cwd** — reaches past the page, so it's how you find an
-   older session). Scope with `--all` / `--project DIR` / `--since ISO`. Defaults
-   to the current project and **20 sessions** (`--limit`); page with `--offset N`.
-   **When results are capped, a `note:` line on stderr tells you** (`showing 20 of
-   62 …`) so a session is never silently hidden.
+   full per-session objects. **Default window: the last 3 weeks** — older sessions
+   are hidden (sessions pile up forever), with a `note:` on stderr saying how many
+   and how to widen (`--since DATE` or `--all-time`). **`--grep RE`** (regex over
+   title/prompts/cwd) **searches all time**, so it's how you find an older session
+   by keyword. Scope with `--all` (all projects) / `--project DIR`; page with
+   `--limit`/`--offset`. A session is never silently hidden — watch the stderr note.
 2. **`summary <h>`** — one cheap call: title, cwd, models, event/message counts,
    per-tool call counts, **`tool_errors` (genuine faults) and `tool_rejected`
    (user declines)** kept separate, skills used, token totals, **plus a

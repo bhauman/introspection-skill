@@ -193,10 +193,15 @@
      :subagents (if (fs/directory? subdir)
                   (count (fs/glob subdir "*.jsonl")) 0)}))
 
-(def default-list-limit
-  "Page size for `list` when --limit is not given. Newest first; page with
-  --offset, or raise --limit for more."
-  20)
+(def default-age-days
+  "`list` shows sessions modified within this many days by default; older ones
+  are hidden (with a stderr note) unless --since/--all-time widens the window.
+  Sessions accumulate forever, so cap by recency, not count."
+  21)
+
+(defn- default-since-iso []
+  (str (.minus (java.time.Instant/now)
+               (java.time.Duration/ofDays default-age-days))))
 
 (defn- grep-match?
   "Does a session header match the search regex? Searches title, the first
@@ -207,31 +212,41 @@
 
 (defn list-sessions
   "List session headers, newest first. opts: :all :project :grep :since
-  :limit :offset. :limit defaults to `default-list-limit`.
+  :limit :offset :all-time.
 
-  Returns {:sessions [headers] :total N :offset O :limit L} so callers can
-  tell when results were capped (and a session is therefore hidden).
+  Default window is the last `default-age-days`; older sessions are hidden but
+  counted (:older) so the caller can say so. An explicit --grep searches *all*
+  time (you're looking for something specific); --since overrides the window;
+  --all-time removes it. No default count cap — recency is the cap.
 
-  Reading a header parses the whole file, so when there is no content
-  :grep we page on the (cheap) mtime-sorted file list *before* reading."
-  [{:keys [grep since offset] :as opts}]
-  (let [limit  (or (:limit opts) default-list-limit)
+  Returns {:sessions [headers] :total N :offset O :limit L :since S :older K}."
+  [{:keys [grep offset all-time] :as opts}]
+  (let [limit  (:limit opts)                       ; no default cap; time caps it
         offset (or offset 0)
+        since  (cond all-time      nil
+                     (:since opts) (:since opts)
+                     grep          nil             ; explicit search spans all time
+                     :else         (default-since-iso))
         re     (when grep (re-pattern grep))
-        files  (->> (session-files opts)
-                    ;; cheap mtime filter + sort without opening files
-                    (filter #(or (nil? since)
-                                 (>= (compare (str (fs/last-modified-time %)) since) 0)))
-                    (sort-by #(str (fs/last-modified-time %)))
-                    reverse)
+        pairs  (->> (session-files opts)
+                    (map (fn [f] [(str (fs/last-modified-time f)) f]))
+                    (sort-by first)
+                    reverse)                        ; [mtime-str file], newest first
+        within (if since
+                 (filterv #(>= (compare (first %) since) 0) pairs)
+                 (vec pairs))
+        older  (- (count pairs) (count within))
         [total page]
         (if re
           ;; grep needs contents -> read all, filter, then page
-          (let [matched (->> files (map session-meta) (filter #(grep-match? re %)))]
-            [(count matched) (->> matched (drop offset) (take limit) vec)])
+          (let [matched (->> within (map #(session-meta (second %)))
+                             (filter #(grep-match? re %)))]
+            [(count matched) (vec (cond->> matched offset (drop offset) limit (take limit)))])
           ;; no grep -> page the file list, then read only that page
-          [(count files) (->> files (drop offset) (take limit) (mapv session-meta))])]
-    {:sessions page :total total :offset offset :limit limit}))
+          (let [paged (cond->> within offset (drop offset) limit (take limit))]
+            [(count within) (mapv #(session-meta (second %)) paged)]))]
+    {:sessions page :total total :offset offset :limit limit
+     :since since :older older}))
 
 (defn compact-meta
   "Terse one-line projection of a session header for `list --oneline`:

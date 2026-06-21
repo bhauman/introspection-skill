@@ -10,7 +10,7 @@
             [clojure.string :as str]))
 
 (def boolean-flags #{:full :no-thinking :all :errors-only :verbose :oneline
-                     :include-subagents})
+                     :include-subagents :all-time})
 (def long-flags    #{:limit :offset :max-chars})
 
 (defn parse-args
@@ -46,11 +46,11 @@ USAGE: claude-sessions <command> [handle] [args] [flags]
 COMMANDS
   list                       Find sessions, newest first; terse by default
                                (id,mtime,#msgs,#subagents,cwd,title — one per line)
-                               --verbose  full per-session objects
-                               --grep RE  regex over title/prompts/cwd
-                               --all  --project DIR  --since ISO
-                               --limit N (default 20)  --offset N (page)
-                               (a stderr note tells you when results were capped)
+                               default window: last 3 weeks (older hidden; stderr note)
+                               --all-time  no age cap   --since ISO  set the window
+                               --grep RE   regex over title/prompts/cwd (searches ALL time)
+                               --verbose   full per-session objects
+                               --all  --project DIR  --limit N  --offset N
   summary   <handle>         Cheap structural map of a session
   transcript <handle>        Normalized JSONL event stream
                                --kind tool_use,prompt,...  --role  --tool GLOB
@@ -76,11 +76,14 @@ GLOB matches tool names with * and ? (e.g. 'mcp__clojure-mcp__*', 'Bash').")
 (defn run [pos opts]
   (case (first pos)
     "list"
-    (let [{:keys [sessions total offset]} (sess/list-sessions opts)
+    (let [{:keys [sessions total offset older since]} (sess/list-sessions opts)
           shown (count sessions)]
-      ;; never silently hide sessions: if results were capped, say so
+      ;; never silently hide sessions
+      (when (pos? (or older 0))
+        (r/print-note (format "%d older session(s) hidden (before %s) — use --since DATE, --grep, or --all-time"
+                              older since)))
       (when (> total (+ offset shown))
-        (r/print-note (format "showing %d of %d sessions (offset %d) — raise --limit, use --offset, or --grep to find more"
+        (r/print-note (format "showing %d of %d in range (offset %d) — use --offset/--limit"
                               shown total offset)))
       (if (:verbose opts)
         (r/print-json sessions opts)                       ; full per-session objects
