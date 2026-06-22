@@ -70,7 +70,8 @@ COMMANDS
   subagents <handle>         List subagent sessions (dive in with handle session/agent-id)
   tokens    <handle>         Token accounting   --by total|message|model
                                --include-subagents  roll up parent + all subagents
-  event     <handle> <i>     One full event by index (expands a truncated one)
+  event     <handle> <i>     One full event by index — i is the `i` field that
+                               transcript/tool/tools emit (expands a truncated one)
 
 GLOB matches tool names with * and ? (e.g. 'mcp__clojure-mcp__*', 'Bash').")
 
