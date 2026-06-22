@@ -3,14 +3,16 @@
 
   Every command takes a session HANDLE (id-prefix | path | latest |
   session/agent-prefix) and supports slicing flags so an eval agent pulls only
-  the slice it needs. Output is JSON (rollups) or JSONL (event streams)."
+  the slice it needs. Output is compact text by default; --json emits JSON
+  (rollups) / JSONL (event streams) for piping to jq."
   (:require [introspect.sessions :as sess]
             [introspect.analyze :as az]
             [introspect.render :as r]
+            [introspect.format :as fmt]
             [clojure.string :as str]))
 
 (def boolean-flags #{:full :no-thinking :all-projects :errors-only :verbose
-                     :oneline :include-subagents :all-time})
+                     :oneline :include-subagents :all-time :json})
 (def value-flags   #{:project :grep :since :until :limit :offset :max-chars
                      :kind :role :tool :range :name :by})
 (def long-flags    #{:limit :offset :max-chars})
@@ -43,11 +45,15 @@
       {:pos pos :opts opts :unknown unknown})))
 
 (def usage
-  "claude-sessions — introspect Claude Code sessions (output is JSON/JSONL)
+  "claude-sessions — introspect Claude Code sessions
 
 USAGE: claude-sessions <command> [handle] [args] [flags]
 
   HANDLE = session-id (or prefix) | path/to.jsonl | latest | session/agent-prefix
+
+OUTPUT: compact, scannable text by default. Add --json for machine-readable
+        JSON (rollups) / JSONL (list, transcript) you can pipe to jq. Diagnostic
+        notes go to stderr — don't 2>&1 when piping --json into a parser.
 
 COMMANDS
   list                       Find sessions, newest first; terse by default
@@ -93,9 +99,10 @@ GLOB matches tool names with * and ? (e.g. 'mcp__clojure-mcp__*', 'Bash').")
       (when (> total (+ offset shown))
         (r/print-note (format "showing %d of %d in range (offset %d) — use --offset/--limit"
                               shown total offset)))
-      (if (:verbose opts)
-        (r/print-json sessions opts)                       ; full per-session objects
-        (r/print-jsonl (map sess/compact-meta sessions) opts)))  ; terse, default
+      (cond
+        (:verbose opts) (r/print-json sessions opts)                          ; full objects
+        (:json opts)    (r/print-jsonl (map sess/compact-meta sessions) opts) ; compact JSONL
+        :else           (println (fmt/sessions-list (map sess/compact-meta sessions)))))
 
     "summary"
     (let [h (handle pos)
@@ -108,27 +115,34 @@ GLOB matches tool names with * and ? (e.g. 'mcp__clojure-mcp__*', 'Bash').")
                   :tool_uses (reduce + 0 (map #(or (:tool_uses %) 0) subs))
                   :tool_errors (reduce + 0 (map #(or (:tool_errors %) 0) subs))
                   :tool_rejected (reduce + 0 (map #(or (:tool_rejected %) 0) subs))}
-                 {:count 0})]
-      (r/print-json (assoc base :subagents agg)))
+                 {:count 0})
+          data (assoc base :subagents agg)]
+      (if (:json opts) (r/print-json data) (println (fmt/summary data))))
 
     "transcript"
     (r/print-jsonl (az/filter-events (events-of pos) opts) opts)
 
     "tools"
-    (r/print-json (az/tool-rollup (events-of pos) opts))
+    (let [data (az/tool-rollup (events-of pos) opts)]
+      (if (:json opts) (r/print-json data) (println (fmt/tools data))))
 
     "tool"
     (let [nm (or (nth pos 2 nil)
                  (throw (ex-info "Usage: tool <handle> <tool-name-glob>" {})))
           ;; this drill-in view defaults to FULL content
-          opts (if (contains? opts :max-chars) opts (assoc opts :full true))]
-      (r/print-json (az/tool-calls (events-of pos) nm opts) opts))
+          opts (if (contains? opts :max-chars) opts (assoc opts :full true))
+          data (az/tool-calls (events-of pos) nm opts)]
+      (if (:json opts)
+        (r/print-json data opts)
+        (println (fmt/tool data (r/max-chars-of opts)))))
 
     "skills"
-    (r/print-json (az/skill-calls (events-of pos) opts))
+    (let [data (az/skill-calls (events-of pos) opts)]
+      (if (:json opts) (r/print-json data) (println (fmt/skills data))))
 
     "subagents"
-    (r/print-json (sess/list-subagents (handle pos)))
+    (let [data (sess/list-subagents (handle pos))]
+      (if (:json opts) (r/print-json data) (println (fmt/subagents data))))
 
     "tokens"
     (let [h (handle pos)
@@ -136,8 +150,9 @@ GLOB matches tool names with * and ? (e.g. 'mcp__clojure-mcp__*', 'Bash').")
           rows (cond-> (sess/load-rows path)
                  ;; roll the whole session tree's cost into one accounting
                  (:include-subagents opts)
-                 (into (mapcat sess/load-rows (sess/subagent-paths h))))]
-      (r/print-json (az/token-rollup rows opts)))
+                 (into (mapcat sess/load-rows (sess/subagent-paths h))))
+          data (az/token-rollup rows opts)]
+      (if (:json opts) (r/print-json data) (println (fmt/tokens data))))
 
     "event"
     (let [i (or (some-> (nth pos 2 nil) parse-long)

@@ -9,8 +9,10 @@ It's a **thin extractor**, not an analyzer. It normalizes the raw JSONL Claude
 Code writes under `~/.claude/projects/`, pairs every tool call with its result,
 separates genuine errors from user declines, and lets you **slice** (by tool,
 kind, index range, regex, time) so you pull only the part you need. Output is
-**JSON / JSONL designed for an LLM to read** — there is no human TUI. The bundled
-[`SKILL.md`](./SKILL.md) is a Claude Code skill that teaches an agent how to drive it.
+**compact, scannable text by default** — the dense shape an agent naturally
+reads — with **`--json`** for JSON/JSONL you can pipe to `jq`. There is no human
+TUI. The bundled [`SKILL.md`](./SKILL.md) is a Claude Code skill that teaches an
+agent how to drive it.
 
 ## Why
 
@@ -51,16 +53,22 @@ The CLI works from any directory — the `bin/` wrapper locates its own `bb.edn`
 ## Quick start
 
 ```bash
-# 1. find a session (terse, newest first; last 3 weeks by default)
+# 1. find a session (newest first; last 3 weeks by default)
 claude-sessions list --all-projects
-# {"id":"a1b2c3d4-…","mtime":"2026-…","messages":228,"subagents":4,"cwd":"…","title":"…"}
+# id        mtime             msgs  sub  project   title
+# a1b2c3d4  2026-06-20T14:02   228    4  my-app    Add OAuth login flow
 
 # 2. cheap structural map of one session (address by id prefix)
 claude-sessions summary a1b2c3d4
-# { "tool_calls": 35, "tool_errors": 0, "tool_rejected": 1,
-#   "tools": [ {"name":"Bash","calls":12}, … ],
-#   "subagents": { "count":4, "with_errors":1, "tool_errors":5 },
-#   "tokens": { "output":161870, "cache_read_pct":92 } }
+# session  a1b2c3d4  "Add OAuth login flow"
+# cwd      /Users/me/work/my-app   branch main
+# span     2026-06-20T11:30 → 2026-06-20T14:02   228 msgs, 180 events
+# tools    35 calls   0 err   1 rej
+#    12 Bash
+#     9 Edit
+#     … 
+# subagents 4  (1 with errors, 5 tool_errors)
+# tokens   output 161.9k   input-side 12.4M   cache-read 92%
 
 # 3. judge how a tool was used — input+result paired, full content
 claude-sessions tool a1b2c3d4 'Bash' --errors-only
@@ -68,6 +76,9 @@ claude-sessions tool a1b2c3d4 'Bash' --errors-only
 # 4. dive into a subagent as if it were its own session
 claude-sessions subagents a1b2c3d4
 claude-sessions transcript a1b2c3d4/a5b94292 --kind tool_use
+
+# 5. machine-readable when you want to pipe to jq
+claude-sessions summary a1b2c3d4 --json | jq .tools
 ```
 
 ## Commands
@@ -116,7 +127,9 @@ an older session by keyword.
 - **Errors vs. rejections.** A `tool_result` marked `is_error` only because the *user declined* (e.g. rejected an `AskUserQuestion` or `Edit`) is flagged `rejected` and kept out of the `errors` count, so error rates aren't inflated.
 - **Subagent visibility.** A child's failures roll up into the parent's `summary` (`subagents.with_errors`/`tool_errors`) so they aren't invisible.
 - **Recency window.** Sessions pile up forever, so `list` browses the last 3 weeks by default and reports (on stderr) how many older ones are hidden. Addressing a session by id always works regardless of the window.
-- **Output channels.** Data on stdout (JSON / JSONL); diagnostics (notes, warnings) on stderr — keep them separate when piping stdout into a JSON parser.
+- **Compact text by default.** Agents introspecting raw logs by hand naturally produce dense tabular text (histograms, aligned columns), not JSON — so that's the default, and it's far lighter on context than pretty JSON. `--json` opts back into JSON (rollups) / JSONL (`list`, `transcript`) for piping to `jq`.
+- **Clean prompts.** `prompt` events are stripped of harness-injected slash-command/caveat/reminder scaffolding, so you see what the user actually typed; pure slash-command turns are flagged with a `command` field instead.
+- **Output channels.** Data on stdout; diagnostics (notes, warnings) on stderr — keep them separate when piping `--json` into a parser.
 
 ## Layout
 

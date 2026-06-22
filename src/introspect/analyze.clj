@@ -35,6 +35,28 @@
     (nil? c) ""
     :else (json/generate-string c)))
 
+(def ^:private command-noise-re
+  "Harness-injected wrappers that pollute a typed user prompt: slash-command
+  scaffolding, local-command caveats/output, and system reminders. None of it
+  is what the user actually asked, so it's stripped from `prompt` events."
+  #"(?is)<(local-command-caveat|command-name|command-message|command-args|local-command-stdout|system-reminder)>.*?</\1>")
+
+(defn slash-command
+  "If a user prompt is a slash-command invocation, return the command name
+  (e.g. \"/compact\"); else nil."
+  [text]
+  (when (string? text)
+    (when-let [n (second (re-find #"(?i)<command-name>\s*(/?[^<\s]+)" text))]
+      (if (str/starts-with? n "/") n (str "/" n)))))
+
+(defn clean-prompt
+  "Strip harness-injected command/caveat/reminder scaffolding from a user
+  prompt, leaving just what the user typed (trimmed). Returns \"\" when the
+  prompt was purely a slash-command artifact."
+  [text]
+  (when (string? text)
+    (-> text (str/replace command-noise-re "") str/trim)))
+
 (defn- block->event
   "Expand one message content block into a normalized event (sans :i)."
   [row block]
@@ -75,9 +97,14 @@
             ("assistant" "user")
             (let [c (get-in row [:message :content])]
               (if (string? c)
-                [{:uuid (:uuid row) :parent (:parentUuid row) :ts (:timestamp row)
-                  :role (:type row) :sidechain (boolean (:isSidechain row))
-                  :kind (if (= "user" (:type row)) "prompt" "text") :text c}]
+                (let [user? (= "user" (:type row))
+                      cmd   (when user? (slash-command c))]
+                  [(cond-> {:uuid (:uuid row) :parent (:parentUuid row) :ts (:timestamp row)
+                            :role (:type row) :sidechain (boolean (:isSidechain row))
+                            :kind (if user? "prompt" "text")
+                            ;; strip slash-command/caveat scaffolding from prompts
+                            :text (if user? (clean-prompt c) c)}
+                     cmd (assoc :command cmd))])
                 (map #(block->event row %) c)))
 
             "system"

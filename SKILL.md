@@ -8,8 +8,8 @@ description: >-
   account for token cost, or examine a subagent's behavior. Triggers: "how was
   <tool> used", "did the <skill> skill trigger correctly", "review the transcript
   / tool usage of session X", "what did this subagent do", "why did Claude pick
-  tool A over B". The CLI emits JSON/JSONL for an agent to read — there is no
-  human UI.
+  tool A over B". The CLI emits compact text for an agent to read (--json for
+  machine-readable JSON/JSONL) — there is no human UI.
 ---
 
 # Claude Session Introspection
@@ -38,9 +38,10 @@ the slice that matters.
 
 ## Worth knowing (not in `help`)
 
-- **Output channels.** Rollups print one JSON value; `transcript` and default
-  `list` print JSONL. Diagnostics print to **stderr** — don't `2>&1` when piping
-  stdout into a JSON parser.
+- **Output channels.** Commands print **compact, scannable text** by default —
+  read it directly. Add **`--json`** for machine-readable JSON (rollups) / JSONL
+  (`list`, `transcript`) to pipe into `jq`. Diagnostics print to **stderr** —
+  don't `2>&1` when piping `--json` into a parser.
 - **Errors vs. rejections.** A `tool_result` flagged `is_error` only because the
   *user declined* is reported as `rejected`, not `errors`, so error rates aren't
   inflated. Both `tool` results and the `tools`/`summary` rollups keep them apart.

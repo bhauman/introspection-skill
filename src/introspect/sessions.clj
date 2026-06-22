@@ -169,11 +169,15 @@
   (let [rows  (load-rows path)
         types (frequencies (map :type rows))
         title (->> rows (filter #(= "ai-title" (:type %))) last :aiTitle)
-        lastp (->> rows (filter #(= "last-prompt" (:type %))) last :lastPrompt)
+        lastp (->> rows (filter #(= "last-prompt" (:type %))) last :lastPrompt
+                   az/clean-prompt)
+        ;; first prompt the user actually typed (skip slash-command artifacts)
         firstp (->> rows
                     (filter #(and (= "user" (:type %))
                                   (string? (get-in % [:message :content]))))
-                    first row-text)
+                    (keep #(az/clean-prompt (get-in % [:message :content])))
+                    (remove str/blank?)
+                    first)
         usage (->> rows (filter #(= "assistant" (:type %)))
                    (keep #(get-in % [:message :usage])))
         cwd   (->> rows (keep :cwd) first)

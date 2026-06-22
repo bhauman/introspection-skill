@@ -1,6 +1,7 @@
 (ns introspect.render
-  "Output. Everything an agent reads is JSON. Rollups print one JSON value;
-  event streams print JSONL (one event per line) for cheap slicing/grepping.
+  "JSON output (opt-in via --json). Rollups print one JSON value; event streams
+  print JSONL (one object per line) for cheap slicing/grepping. The default
+  human/agent-facing rendering is compact text — see introspect.format.
 
   Truncation keeps the eval agent's context small: long strings are cut to
   :max-chars with a `…[+N chars]` marker. Pass :full to disable."
@@ -26,6 +27,12 @@
   (cond full nil
         max-chars max-chars
         :else default-max-chars))
+
+(defn max-chars-of
+  "Public: the effective truncation length for these opts (nil = full).
+  Lets the compact text renderers truncate the same way the JSON path does."
+  [opts]
+  (max-chars opts))
 
 (defn print-json
   "Print one JSON value (pretty). opts may carry :full / :max-chars."
